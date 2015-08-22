@@ -80,6 +80,7 @@ object ApplicationMain extends App {
         for(i <- 0 to weights.length-1) {
           weights(i) += index
           // TODO: change weights here
+          // Checking Github
         }
         //println(index + ", " + iteration + " : " + weights.deep.mkString(" "))
 
