@@ -23,6 +23,7 @@ object ApplicationMain extends App {
     var reportsCount = 0
     var data : Data = _
     var epoch :Int = 0
+    val start: Long = System.currentTimeMillis
 
     def receive = {
       case Data(dataPoints) => {
@@ -36,19 +37,21 @@ object ApplicationMain extends App {
 
       case Weight(weights, weightStart) => {
         for (i <- 0 to (weights.length-1) ) {
-          this.weights(i+weightStart) = weights(i)
+          this.weights(i+weightStart) = (weights(i)+this.weights(i+weightStart))/2
         }
         //println(this.weights.deep.mkString(" "))
 
         reportsCount += 1
         if (reportsCount == clustersCount) {
-          println("epoch result", this.epoch, risk(this.weights, this.data))
+          if(this.epoch % 10 == 0) println("epoch result", this.epoch, risk(this.weights, this.data))
           reportsCount = 0
           this.epoch += 1
           if (this.epoch == 1000)
           {
             // println(this.weights.deep.mkString(" "))
             println("final result", risk(this.weights, this.data))
+            println("time", System.currentTimeMillis - start)
+            context.system.shutdown()
           }
           else {
             for (ind <- 0 to clustersCount - 1) {
@@ -97,7 +100,7 @@ object ApplicationMain extends App {
       }
       for (i <- 0 to m - 1)
       {
-        risk_val += squared_hinge(weights, data.dataPoints(i).features, data.dataPoints(i).output)/m
+        risk_val += 1.0/m*squared_hinge(weights, data.dataPoints(i).features, data.dataPoints(i).output)
       }
       return risk_val
     }
@@ -151,7 +154,7 @@ object ApplicationMain extends App {
           iteration = 0
           master ! Weight(weights, weightStart)
         }
-        else workers.apply(next) ! Weight(weights, weightStart)
+        else workers(next) ! Weight(weights, weightStart)
       }
     }
 
