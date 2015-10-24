@@ -14,8 +14,8 @@ case class Weight(weights : Array[Double], weightStart : Int)
 object ApplicationMain extends App {
   val clustersCount = 4
   val d = 3231964
-  val m = 23961
-  val eta : Double = 10.0
+  val m = 10000
+  val eta : Double = 3.0
   val lmbd : Double = 0.00001
 
   val system = ActorSystem("MyActorSystem")
@@ -38,7 +38,7 @@ object ApplicationMain extends App {
         this.omega_j = omega_j
         this.testData = testData
 
-        println("data " + data.dataPoints(0).features.deep.mkString(" "))
+        // println("data " + data.dataPoints(0).features.deep.mkString(" "))
 
         println(risk(this.weights, this.data))
         for (worker <- workers) {
@@ -54,7 +54,7 @@ object ApplicationMain extends App {
 
         reportsCount += 1
         if (reportsCount == clustersCount) {
-          if(this.epoch % 100 == 0) println("epoch result", this.epoch, risk(this.weights, this.data), accuracy(this.weights, this.testData))
+          if(this.epoch % 10 == 0) println("epoch result", this.epoch, risk(this.weights, this.data), accuracy_f1(this.weights, this.testData))
           reportsCount = 0
           this.epoch += 1
           if (this.epoch == 10000)
@@ -117,7 +117,7 @@ object ApplicationMain extends App {
       return risk_val
     }
 
-    def accuracy(weights : Array[Double], testData : Data) : Double =
+    def accuracy_f1(weights : Array[Double], testData : Data) : Tuple2[Double, Double] =
     {
       var truePos = 0
       var trueNeg = 0
@@ -148,7 +148,7 @@ object ApplicationMain extends App {
           }
         }
       }
-      (trueNeg + truePos).toDouble/(trueNeg + falseNeg + truePos + falsePos).toDouble
+      ((trueNeg + truePos).toDouble/(trueNeg + falseNeg + truePos + falsePos).toDouble, 2.0*truePos/(2.0*truePos + falsePos + falseNeg))
     }
   }
 
@@ -221,7 +221,7 @@ object ApplicationMain extends App {
 
   def getTrainingData() : Data =
   {
-    val lines = scala.io.Source.fromFile("data/url_small.tr").mkString
+    val lines = scala.io.Source.fromFile("data/url_shuf.tr").mkString
     var dataPoints = new Array[DataPoint](lines.split('\n').length)
     var data = new Data(dataPoints)
     var i = 0
@@ -253,7 +253,7 @@ object ApplicationMain extends App {
   def getTestData() : Data =
   {
 
-    val lines = scala.io.Source.fromFile("data/url_small.tr").mkString
+    val lines = scala.io.Source.fromFile("data/url_shuf.t").mkString
     var testDataPoints = new Array[DataPoint](lines.split('\n').length)
     var testData = new Data(testDataPoints)
     var i = 0

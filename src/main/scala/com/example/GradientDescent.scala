@@ -94,7 +94,7 @@ object GradientDescent extends App {
         val lin_loss = data.dataPoints(i).output*dot_product(weights, data.dataPoints(i).features)
         if (lin_loss < 1)
         {
-          var mx = 0.0
+          var mx = a
           if (1 - lin_loss > mx) mx = 1 - lin_loss
           value -= (1.0/1.0)*2*mx*data.dataPoints(i).output*data.dataPoints(i).features(j)
         }
