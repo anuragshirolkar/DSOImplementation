@@ -7,7 +7,7 @@ package com.example
 
 //case class DataPoint(var features : Array[Double], var output : Int)
 //case class Data(var dataPoints : Array[DataPoint])
-
+/*
 object GradientDescent extends App {
   val clustersCount = 4
   val d = 124
@@ -116,3 +116,4 @@ object GradientDescent extends App {
   println("final result", risk(weights, data))
   println("time", System.currentTimeMillis() - start)
 }
+*/

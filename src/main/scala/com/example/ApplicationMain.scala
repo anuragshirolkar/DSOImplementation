@@ -4,15 +4,18 @@ import akka.actor.{Actor, Props, ActorSystem}
 
 case object Message
 case class SetIndex(ind : Int)
-case class DataPoint(var features : Array[Double], var output : Int)
+// case class DataPoint(var features : Array[Double], var output : Int)
+case class DataPoint(var features : Array[Tuple2[Int, Double]], var output : Int)
 case class Data(var dataPoints : Array[DataPoint])
+case class AllData(var data : Data, var omega_i : Array[Int], var omega_j : Array[Int])
+case class AllDataWithTest(var data : Data, var omega_i : Array[Int], var omega_j : Array[Int], var testData : Data)
 case class Weight(weights : Array[Double], weightStart : Int)
 
 object ApplicationMain extends App {
   val clustersCount = 4
-  val d = 124
-  val m = 1604
-  val eta : Double = 3.0
+  val d = 3231964
+  val m = 23961
+  val eta : Double = 10.0
   val lmbd : Double = 0.00001
 
   val system = ActorSystem("MyActorSystem")
@@ -22,16 +25,24 @@ object ApplicationMain extends App {
     var weights = Array.fill[Double](d)(0)
     var reportsCount = 0
     var data : Data = _
+    var testData : Data =_
     var epoch :Int = 0
     val start: Long = System.currentTimeMillis
+    var omega_i = Array.fill[Int](m)(0)
+    var omega_j = Array.fill[Int](d)(0)
 
     def receive = {
-      case Data(dataPoints) => {
-        this.data = Data(dataPoints)
+      case AllDataWithTest(data, omega_i, omega_j, testData) => {
+        this.data = data
+        this.omega_i = omega_i
+        this.omega_j = omega_j
+        this.testData = testData
+
+        println("data " + data.dataPoints(0).features.deep.mkString(" "))
 
         println(risk(this.weights, this.data))
         for (worker <- workers) {
-          worker ! Data(dataPoints)
+          worker ! AllData(data, omega_i, omega_j)
         }
       }
 
@@ -39,14 +50,14 @@ object ApplicationMain extends App {
         for (i <- 0 to (weights.length-1) ) {
           this.weights(i+weightStart) = (weights(i)+this.weights(i+weightStart))/2
         }
-        //println(this.weights.deep.mkString(" "))
+        // println(this.weights.deep.mkString(" "))
 
         reportsCount += 1
         if (reportsCount == clustersCount) {
-          if(this.epoch % 10 == 0) println("epoch result", this.epoch, risk(this.weights, this.data))
+          if(this.epoch % 100 == 0) println("epoch result", this.epoch, risk(this.weights, this.data), accuracy(this.weights, this.testData))
           reportsCount = 0
           this.epoch += 1
-          if (this.epoch == 1000)
+          if (this.epoch == 10000)
           {
             // println(this.weights.deep.mkString(" "))
             println("final result", risk(this.weights, this.data))
@@ -70,18 +81,19 @@ object ApplicationMain extends App {
       }
     }
 
-    def dot_product(a : Array[Double], b : Array[Double]) : Double =
+    def dot_product(a : Array[Double], b : Array[Tuple2[Int, Double]]) : Double =
     {
-      val l = a.length
+      val l = b.length
       var ans : Double = 0
+      // println(b.deep.mkString(" "))
       for (i <- 0 to l-1)
       {
-        ans += a(i)*b(i)
+        ans += a(b(i)._1)*b(i)._2
       }
       return ans
     }
 
-    def squared_hinge(w : Array[Double], x : Array[Double], y : Int) : Double =
+    def squared_hinge(w : Array[Double], x : Array[Tuple2[Int, Double]], y : Int) : Double =
     {
       var mx : Double = 0
       if (1 - y*dot_product(w, x) > 0)
@@ -105,6 +117,39 @@ object ApplicationMain extends App {
       return risk_val
     }
 
+    def accuracy(weights : Array[Double], testData : Data) : Double =
+    {
+      var truePos = 0
+      var trueNeg = 0
+      var falsePos = 0
+      var falseNeg = 0
+      for (dataPoint <- testData.dataPoints)
+      {
+        if (dataPoint.output == 1)
+        {
+          if (dot_product(weights, dataPoint.features) <= 0)
+          {
+            falseNeg += 1
+          }
+          else
+          {
+            truePos += 1
+          }
+        }
+        else
+        {
+          if (dot_product(weights, dataPoint.features) <= 0)
+          {
+            trueNeg += 1
+          }
+          else
+          {
+            falsePos += 1
+          }
+        }
+      }
+      (trueNeg + truePos).toDouble/(trueNeg + falseNeg + truePos + falsePos).toDouble
+    }
   }
 
   class Worker extends Actor {
@@ -114,14 +159,18 @@ object ApplicationMain extends App {
     var dataPoints = Array[DataPoint]()
     var iteration = 0
     var alpha = Array.fill[Double](m/clustersCount)(0)
+    var omega_i = Array.fill[Int](m)(0)
+    var omega_j = Array.fill[Int](d)(0)
 
     def receive = {
       case SetIndex(ind)    => {
         index = ind
         alphaStart = (m/clustersCount) * index
       }
-      case Data(dataPoints) => {
-        this.dataPoints = dataPoints
+      case AllData(data, omega_i, omega_j) => {
+        this.dataPoints = data.dataPoints
+        this.omega_i = omega_i;
+        this.omega_j = omega_j
       }
       case Message          => {
 
@@ -130,18 +179,25 @@ object ApplicationMain extends App {
       case Weight(weights, weightStart)  => {
 
         // println("signal received by workers", this.index)
-        for(j <- 0 to weights.length-1) {
-          for (i <- alphaStart to alphaStart + (m/clustersCount)-1)
+        // println("weightStart " + weightStart)
+        for (i <- alphaStart to alphaStart + (m/clustersCount)-1)
+        {
+          for(j <- 0 to data.dataPoints(i).features.length-1)
           {
-            weights(j) -= eta/m*(lmbd*weights(j) - alpha(i-alphaStart)*dataPoints(i).features(j+weightStart))
-            if (alpha(i-alphaStart) * dataPoints(i).output >= 0)
+            if (data.dataPoints(i).features(j)._1 >= weightStart && data.dataPoints(i).features(j)._1 < weightStart + d/clustersCount)
             {
-              alpha(i-alphaStart) += eta*((dataPoints(i).output - alpha(i-alphaStart)/2.0)/(m*d) - weights(j)*dataPoints(i).features(j+weightStart)/m)
+              val index = data.dataPoints(i).features(j)._1
+              weights(index-weightStart) -= eta*(lmbd*weights(index-weightStart)/omega_j(index) - alpha(i-alphaStart)*dataPoints(i).features(j)._2/m)
+              if (alpha(i-alphaStart) * dataPoints(i).output >= 0)
+              {
+                alpha(i-alphaStart) += eta*((dataPoints(i).output - alpha(i-alphaStart)/2.0)/(m*omega_i(i)) - weights(index-weightStart)*dataPoints(i).features(j)._2/m)
+              }
+              else
+              {
+                alpha(i - alphaStart) = 0
+              }
             }
-            else
-            {
-              alpha(i - alphaStart) = 0
-            }
+
           }
         }
 
@@ -163,6 +219,69 @@ object ApplicationMain extends App {
 
   }
 
+  def getTrainingData() : Data =
+  {
+    val lines = scala.io.Source.fromFile("data/url_small.tr").mkString
+    var dataPoints = new Array[DataPoint](lines.split('\n').length)
+    var data = new Data(dataPoints)
+    var i = 0
+    for(line <- lines.split('\n'))
+    {
+      val terms = line.split(' ')
+      var j = 0
+      var dataPoint = new DataPoint(new Array[Tuple2[Int, Double]](terms.length), 0)
+      data.dataPoints(i) = dataPoint
+      for (term <- terms)
+    {
+      if (j == 0)
+    {
+      data.dataPoints(i).output = term.toInt
+    }
+      else
+    {
+      val splitTerm = term.split(':')
+      data.dataPoints(i).features(j-1) = Tuple2(splitTerm(0).toInt-1, splitTerm(1).toDouble)
+    }
+      j += 1
+    }
+      data.dataPoints(i).features(terms.length-1) = Tuple2(d-1, 1.0)
+      i += 1
+    }
+    data
+  }
+
+  def getTestData() : Data =
+  {
+
+    val lines = scala.io.Source.fromFile("data/url_small.tr").mkString
+    var testDataPoints = new Array[DataPoint](lines.split('\n').length)
+    var testData = new Data(testDataPoints)
+    var i = 0
+    for(line <- lines.split('\n'))
+    {
+      val terms = line.split(' ')
+      var j = 0
+      val testDataPoint = new DataPoint(new Array[Tuple2[Int, Double]](terms.length), 0)
+      testData.dataPoints(i) = testDataPoint
+      for (term <- terms)
+      {
+        if (j == 0)
+        {
+          testData.dataPoints(i).output = term.toInt
+        }
+        else
+        {
+          val splitTerm = term.split(':')
+          testData.dataPoints(i).features(j-1) = Tuple2(splitTerm(0).toInt-1, splitTerm(1).toDouble)
+        }
+        j += 1
+      }
+      testData.dataPoints(i).features(terms.length-1) = Tuple2(d-1, 1.0)
+      i += 1
+    }
+    testData
+  }
+
   var workers = Array(
     system.actorOf(Props[Worker], "worker1"),
     system.actorOf(Props[Worker], "worker2"),
@@ -172,32 +291,25 @@ object ApplicationMain extends App {
 
   var master = system.actorOf(Props[Master], "master")
 
-  val lines = scala.io.Source.fromFile("data/a1a.txt").mkString
-  var dataPoints = new Array[DataPoint](lines.split('\n').length)
-  var data = new Data(dataPoints)
-  var i = 0
-  for(line <- lines.split('\n'))
+
+  val data = getTrainingData()
+  val testData = getTestData()
+
+
+
+  var omega_i = Array.fill[Int](m)(0)
+  var omega_j = Array.fill[Int](d)(0)
+  for (i <- 0 to data.dataPoints.length-1)
   {
-    val terms = line.split(' ')
-    var j = 0
-    var dataPoint = new DataPoint(new Array[Double](d), 0)
-    data.dataPoints(i) = dataPoint
-    for (term <- terms)
+    val dataPoint = data.dataPoints(i)
+    for (j <- 0 to dataPoint.features.length-1)
     {
-      if (j == 0)
-      {
-        data.dataPoints(i).output = term.toInt
-      }
-      else
-      {
-        var splitTerm = term.split(':')
-        data.dataPoints(i).features(splitTerm(0).toInt-1) = splitTerm(1).toDouble
-      }
-      j += 1
-      data.dataPoints(i).features(d-1) = 1
+      omega_i(i) += 1
+      omega_j(dataPoint.features(j)._1) += 1
     }
-    i += 1
   }
+  // println(omega_i.deep.mkString(" "))
+  // println(omega_j.deep.mkString(" "))
 
   workers(0) ! SetIndex(0)
   workers(1) ! SetIndex(1)
@@ -206,7 +318,7 @@ object ApplicationMain extends App {
 
 
 
-  master ! data
+  master ! AllDataWithTest(data, omega_i, omega_j, testData)
 
   master ! Message
   system.awaitTermination()
